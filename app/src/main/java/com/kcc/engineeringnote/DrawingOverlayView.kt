@@ -3,12 +3,16 @@ package com.kcc.engineeringnote
 import android.app.AlertDialog
 import android.content.Context
 import android.graphics.*
+import android.graphics.Typeface
 import android.text.InputType
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.Spinner
+import android.widget.ArrayAdapter
 import kotlin.math.*
 
 class DrawingOverlayView @JvmOverloads constructor(
@@ -18,8 +22,10 @@ class DrawingOverlayView @JvmOverloads constructor(
     var toolMode: ToolMode = ToolMode.PEN
     var penColor: Int = Color.RED
     var penWidth: Float = 5f
+    var textSizePx: Float = 34f
     var onChanged: (() -> Unit)? = null
     var onStatus: ((String) -> Unit)? = null
+    var nextCommentNumber: (() -> String)? = null
 
     private var marks: MutableList<Markup> = mutableListOf()
     private val redoStack = mutableListOf<Markup>()
@@ -28,6 +34,7 @@ class DrawingOverlayView @JvmOverloads constructor(
     fun setMarks(newMarks: MutableList<Markup>) {
         marks = newMarks
         redoStack.clear()
+        working = null
         invalidate()
     }
 
@@ -74,7 +81,7 @@ class DrawingOverlayView @JvmOverloads constructor(
             MarkupType.ARROW -> mutableListOf(first, last)
             else -> mutableListOf(NPoint(minX, minY), NPoint(maxX, maxY))
         }
-        marks[i] = Markup(type = newType, points = pts, color = src.color, width = src.width)
+        marks[i] = src.copy(type = newType, points = pts)
         onStatus?.invoke("펜 표시를 ${newType.name} 도형으로 정리했습니다")
         changed()
     }
@@ -86,17 +93,19 @@ class DrawingOverlayView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        val isStylus = e.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS ||
-                e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
-
-        // Pen/highlighter/eraser are stylus-only so a finger never creates accidental ink.
+        if (toolMode == ToolMode.READ) return false
+        val isStylus = e.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS || e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
         if (!isStylus && toolMode in setOf(ToolMode.PEN, ToolMode.HIGHLIGHTER, ToolMode.ERASER)) return false
 
-        val p = norm(e.x, e.y)
+        val p = norm(e.x, e.y, e.pressure.coerceIn(0.1f, 1.5f))
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (toolMode == ToolMode.TEXT) {
-                    requestText(p)
+                    requestText(p, false)
+                    return true
+                }
+                if (toolMode == ToolMode.COMMENT) {
+                    requestText(p, true)
                     return true
                 }
                 if (toolMode == ToolMode.ERASER || e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER ||
@@ -112,7 +121,7 @@ class DrawingOverlayView @JvmOverloads constructor(
                     ToolMode.RECT -> MarkupType.RECT
                     else -> return true
                 }
-                working = Markup(type = type, points = mutableListOf(p), color = penColor, width = penWidth)
+                working = Markup(type = type, points = mutableListOf(p), color = penColor, width = penWidth, fontSize = textSizePx)
                 invalidate()
                 return true
             }
@@ -139,19 +148,38 @@ class DrawingOverlayView @JvmOverloads constructor(
         return super.onTouchEvent(e)
     }
 
-    private fun requestText(p: NPoint) {
+    private fun requestText(p: NPoint, asComment: Boolean) {
         val edit = EditText(context).apply {
-            hint = "코멘트 입력"
+            hint = if (asComment) "Engineering comment" else "텍스트 입력"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            minLines = 2
+            minLines = 3
+        }
+        val category = Spinner(context).apply {
+            adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item,
+                listOf("General", "Piping", "Mechanical", "Civil", "Electrical", "Instrument", "Painting", "Document"))
+        }
+        val holder = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(36, 0, 36, 0)
+            addView(edit)
+            if (asComment) addView(category)
         }
         val dlg = AlertDialog.Builder(context)
-            .setTitle("텍스트 / 코멘트")
-            .setView(edit)
+            .setTitle(if (asComment) "새 Comment" else "텍스트")
+            .setView(holder)
             .setPositiveButton("입력") { _, _ ->
                 val t = edit.text.toString().trim()
                 if (t.isNotEmpty()) {
-                    marks += Markup(type = MarkupType.TEXT, points = mutableListOf(p), text = t, color = penColor, width = penWidth)
+                    marks += Markup(
+                        type = if (asComment) MarkupType.COMMENT else MarkupType.TEXT,
+                        points = mutableListOf(p),
+                        text = t,
+                        color = penColor,
+                        width = penWidth,
+                        fontSize = textSizePx,
+                        commentNo = if (asComment) nextCommentNumber?.invoke().orEmpty() else "",
+                        category = if (asComment) category.selectedItem?.toString() ?: "General" else "General"
+                    )
                     changed()
                 }
             }
@@ -168,10 +196,8 @@ class DrawingOverlayView @JvmOverloads constructor(
     }
 
     private fun eraseAt(p: NPoint) {
-        val radius = 0.025f
-        val idx = marks.indexOfLast { m ->
-            m.points.any { hypot(it.x - p.x, it.y - p.y) < radius }
-        }
+        val radius = 0.028f
+        val idx = marks.indexOfLast { m -> m.points.any { hypot(it.x - p.x, it.y - p.y) < radius } }
         if (idx >= 0) {
             redoStack += marks.removeAt(idx)
             changed()
@@ -180,56 +206,83 @@ class DrawingOverlayView @JvmOverloads constructor(
 
     private fun drawMarkup(canvas: Canvas, m: Markup) {
         if (m.points.isEmpty()) return
+        when (m.type) {
+            MarkupType.PEN, MarkupType.HIGHLIGHTER -> drawInk(canvas, m)
+            MarkupType.RECT -> if (m.points.size >= 2) canvas.drawRect(rectOf(m.points[0], m.points[1]), strokePaint(m))
+            MarkupType.CLOUD -> if (m.points.size >= 2) drawCloud(canvas, rectOf(m.points[0], m.points[1]), strokePaint(m))
+            MarkupType.ARROW -> if (m.points.size >= 2) drawArrow(canvas, denorm(m.points[0]), denorm(m.points[1]), strokePaint(m))
+            MarkupType.TEXT -> drawText(canvas, m, false)
+            MarkupType.COMMENT -> drawText(canvas, m, true)
+        }
+    }
+
+    private fun drawInk(canvas: Canvas, m: Markup) {
+        if (m.points.size == 1) return
+        for (i in 1 until m.points.size) {
+            val a = denorm(m.points[i - 1])
+            val b = denorm(m.points[i])
+            val pressure = ((m.points[i - 1].pressure + m.points[i].pressure) / 2f).coerceIn(0.25f, 1.6f)
+            val p = strokePaint(m).apply {
+                strokeWidth = if (m.type == MarkupType.HIGHLIGHTER) m.width * 2.2f else m.width * pressure
+                if (m.type == MarkupType.HIGHLIGHTER) alpha = 75
+            }
+            canvas.drawLine(a.x, a.y, b.x, b.y, p)
+        }
+    }
+
+    private fun strokePaint(m: Markup) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = m.color
+        strokeWidth = m.width
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+
+    private fun drawText(canvas: Canvas, m: Markup, isComment: Boolean) {
+        val pt = denorm(m.points[0])
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = m.color
-            strokeWidth = m.width
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            if (m.type == MarkupType.HIGHLIGHTER) alpha = 80
+            style = Paint.Style.FILL
+            textSize = m.fontSize.coerceAtLeast(24f)
+            isUnderlineText = m.underline
+            isStrikeThruText = m.strike
+            typeface = Typeface.create(Typeface.DEFAULT, when {
+                m.bold && m.italic -> Typeface.BOLD_ITALIC
+                m.bold -> Typeface.BOLD
+                m.italic -> Typeface.ITALIC
+                else -> Typeface.NORMAL
+            })
         }
-        when (m.type) {
-            MarkupType.PEN, MarkupType.HIGHLIGHTER -> {
-                val path = Path()
-                val p0 = denorm(m.points.first())
-                path.moveTo(p0.x, p0.y)
-                m.points.drop(1).forEach { np -> denorm(np).also { path.lineTo(it.x, it.y) } }
-                canvas.drawPath(path, paint)
-            }
-            MarkupType.RECT -> if (m.points.size >= 2) canvas.drawRect(rectOf(m.points[0], m.points[1]), paint)
-            MarkupType.CLOUD -> if (m.points.size >= 2) drawCloud(canvas, rectOf(m.points[0], m.points[1]), paint)
-            MarkupType.ARROW -> if (m.points.size >= 2) drawArrow(canvas, denorm(m.points[0]), denorm(m.points[1]), paint)
-            MarkupType.TEXT -> {
-                val pt = denorm(m.points[0])
-                paint.style = Paint.Style.FILL
-                paint.textSize = max(28f, m.width * 5f)
-                m.text.split("\n").forEachIndexed { i, line ->
-                    canvas.drawText(line, pt.x, pt.y + i * paint.textSize * 1.2f, paint)
-                }
-            }
+        val prefix = if (isComment) "${m.commentNo} [${m.status.name}] " else ""
+        val lines = (prefix + m.text).split("\n")
+        if (isComment) {
+            val maxWidth = lines.maxOfOrNull { paint.measureText(it) } ?: 0f
+            val box = RectF(pt.x - 10, pt.y - paint.textSize, pt.x + maxWidth + 18, pt.y + lines.size * paint.textSize * 1.25f)
+            canvas.drawRoundRect(box, 10f, 10f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(220,255,255,255); style = Paint.Style.FILL })
+            canvas.drawRoundRect(box, 10f, 10f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = m.color; style = Paint.Style.STROKE; strokeWidth = 2f })
         }
+        lines.forEachIndexed { i, line -> canvas.drawText(line, pt.x, pt.y + i * paint.textSize * 1.2f, paint) }
     }
 
     private fun drawCloud(c: Canvas, r: RectF, p: Paint) {
         val step = max(18f, min(r.width(), r.height()) / 7f)
         var x = r.left
-        while (x < r.right) {
-            c.drawCircle(x, r.top, step * .45f, p); c.drawCircle(x, r.bottom, step * .45f, p); x += step
-        }
+        while (x < r.right) { c.drawArc(RectF(x, r.top-step/2, min(x+step,r.right), r.top+step/2), 180f, 180f, false, p); x += step*0.75f }
+        x = r.left
+        while (x < r.right) { c.drawArc(RectF(x, r.bottom-step/2, min(x+step,r.right), r.bottom+step/2), 0f, 180f, false, p); x += step*0.75f }
         var y = r.top
-        while (y < r.bottom) {
-            c.drawCircle(r.left, y, step * .45f, p); c.drawCircle(r.right, y, step * .45f, p); y += step
-        }
+        while (y < r.bottom) { c.drawArc(RectF(r.left-step/2, y, r.left+step/2, min(y+step,r.bottom)), 90f, 180f, false, p); y += step*0.75f }
+        y = r.top
+        while (y < r.bottom) { c.drawArc(RectF(r.right-step/2, y, r.right+step/2, min(y+step,r.bottom)), 270f, 180f, false, p); y += step*0.75f }
     }
 
     private fun drawArrow(c: Canvas, a: PointF, b: PointF, p: Paint) {
         c.drawLine(a.x, a.y, b.x, b.y, p)
-        val angle = atan2((b.y-a.y).toDouble(), (b.x-a.x).toDouble())
-        val len = 28.0
-        val a1 = angle + Math.PI * .82
-        val a2 = angle - Math.PI * .82
-        c.drawLine(b.x, b.y, (b.x + cos(a1)*len).toFloat(), (b.y + sin(a1)*len).toFloat(), p)
-        c.drawLine(b.x, b.y, (b.x + cos(a2)*len).toFloat(), (b.y + sin(a2)*len).toFloat(), p)
+        val ang = atan2((b.y-a.y).toDouble(), (b.x-a.x).toDouble())
+        val len = 28f
+        for (d in doubleArrayOf(2.55, -2.55)) {
+            c.drawLine(b.x, b.y, (b.x + cos(ang+d)*len).toFloat(), (b.y + sin(ang+d)*len).toFloat(), p)
+        }
     }
 
     private fun rectOf(a: NPoint, b: NPoint): RectF {
@@ -237,7 +290,7 @@ class DrawingOverlayView @JvmOverloads constructor(
         return RectF(min(p1.x,p2.x), min(p1.y,p2.y), max(p1.x,p2.x), max(p1.y,p2.y))
     }
 
-    private fun norm(x: Float, y: Float) = NPoint(x / width.coerceAtLeast(1), y / height.coerceAtLeast(1))
-    private fun denorm(p: NPoint) = PointF(p.x * width, p.y * height)
+    private fun norm(x: Float, y: Float, pressure: Float = 1f) = NPoint((x/width.coerceAtLeast(1)).coerceIn(0f,1f), (y/height.coerceAtLeast(1)).coerceIn(0f,1f), pressure)
+    private fun denorm(p: NPoint) = PointF(p.x*width, p.y*height)
     private fun changed() { invalidate(); onChanged?.invoke() }
 }

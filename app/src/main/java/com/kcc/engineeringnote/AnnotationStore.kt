@@ -13,30 +13,41 @@ class AnnotationStore(private val context: Context, private val documentUri: Uri
     }
 
     fun save(pages: Map<Int, List<Markup>>, currentPage: Int) {
-        val root = JSONObject()
-        root.put("documentUri", documentUri.toString())
-        root.put("currentPage", currentPage)
+        val root = JSONObject().apply {
+            put("documentUri", documentUri.toString())
+            put("currentPage", currentPage)
+            put("savedAt", System.currentTimeMillis())
+        }
         val pageObj = JSONObject()
         pages.forEach { (page, marks) ->
             val arr = JSONArray()
             marks.forEach { m ->
-                val o = JSONObject()
-                o.put("id", m.id)
-                o.put("type", m.type.name)
-                o.put("text", m.text)
-                o.put("color", m.color)
-                o.put("width", m.width.toDouble())
-                val pts = JSONArray()
-                m.points.forEach { p ->
-                    pts.put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()))
-                }
-                o.put("points", pts)
-                arr.put(o)
+                arr.put(JSONObject().apply {
+                    put("id", m.id)
+                    put("type", m.type.name)
+                    put("text", m.text)
+                    put("color", m.color)
+                    put("width", m.width.toDouble())
+                    put("fontSize", m.fontSize.toDouble())
+                    put("bold", m.bold)
+                    put("italic", m.italic)
+                    put("underline", m.underline)
+                    put("strike", m.strike)
+                    put("commentNo", m.commentNo)
+                    put("category", m.category)
+                    put("status", m.status.name)
+                    val pts = JSONArray()
+                    m.points.forEach { p -> pts.put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()).put(p.pressure.toDouble())) }
+                    put("points", pts)
+                })
             }
             pageObj.put(page.toString(), arr)
         }
         root.put("pages", pageObj)
-        file.writeText(root.toString())
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(root.toString())
+        if (file.exists()) file.delete()
+        tmp.renameTo(file)
     }
 
     fun load(): Pair<MutableMap<Int, MutableList<Markup>>, Int> {
@@ -52,19 +63,27 @@ class AnnotationStore(private val context: Context, private val documentUri: Uri
                 val list = mutableListOf<Markup>()
                 for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
-                    val ptsArr = o.getJSONArray("points")
                     val pts = mutableListOf<NPoint>()
+                    val ptsArr = o.optJSONArray("points") ?: JSONArray()
                     for (j in 0 until ptsArr.length()) {
                         val p = ptsArr.getJSONArray(j)
-                        pts += NPoint(p.getDouble(0).toFloat(), p.getDouble(1).toFloat())
+                        pts += NPoint(p.optDouble(0, 0.0).toFloat(), p.optDouble(1, 0.0).toFloat(), p.optDouble(2, 1.0).toFloat())
                     }
                     list += Markup(
                         id = o.optLong("id", System.nanoTime()),
-                        type = MarkupType.valueOf(o.getString("type")),
+                        type = runCatching { MarkupType.valueOf(o.optString("type", "PEN")) }.getOrDefault(MarkupType.PEN),
                         points = pts,
                         text = o.optString("text", ""),
                         color = o.optInt("color", android.graphics.Color.RED),
-                        width = o.optDouble("width", 5.0).toFloat()
+                        width = o.optDouble("width", 5.0).toFloat(),
+                        fontSize = o.optDouble("fontSize", 30.0).toFloat(),
+                        bold = o.optBoolean("bold", false),
+                        italic = o.optBoolean("italic", false),
+                        underline = o.optBoolean("underline", false),
+                        strike = o.optBoolean("strike", false),
+                        commentNo = o.optString("commentNo", ""),
+                        category = o.optString("category", "General"),
+                        status = runCatching { CommentStatus.valueOf(o.optString("status", "OPEN")) }.getOrDefault(CommentStatus.OPEN)
                     )
                 }
                 result[key.toInt()] = list
