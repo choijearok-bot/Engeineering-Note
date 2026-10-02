@@ -10,6 +10,9 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
 import android.view.Gravity
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.WindowInsets
 import android.widget.*
@@ -26,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var commentPanel: LinearLayout
     private lateinit var commentList: LinearLayout
     private lateinit var editorFrame: FrameLayout
+    private lateinit var contentLayer: FrameLayout
     private lateinit var imageView: ImageView
     private lateinit var overlay: DrawingOverlayView
     private lateinit var status: TextView
@@ -47,6 +51,9 @@ class MainActivity : AppCompatActivity() {
     private var currentPage = 0
     private var readMode = false
     private var fullScreen = false
+    private var zoomScale = 1f
+    private var panX = 0f
+    private var panY = 0f
 
     private val autoSaveHandler = Handler(Looper.getMainLooper())
     private val autoSaveRunnable = object : Runnable {
@@ -144,6 +151,9 @@ class MainActivity : AppCompatActivity() {
         navBar.addView(pageIndicator, LinearLayout.LayoutParams(dp(110), -1))
         nav("▶") { changePage(1) }
         nav("페이지 이동") { askPageJump() }
+        nav("−") { setZoom((zoomScale - 0.25f).coerceAtLeast(1f)) }
+        nav("100%") { resetZoom() }
+        nav("+") { setZoom((zoomScale + 0.25f).coerceAtMost(5f)) }
         nav("Comments") { toggle(commentPanel); refreshComments() }
         nav("읽기") { toggleReadMode() }
         nav("전체화면") { toggleFullScreen() }
@@ -223,6 +233,11 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Color.rgb(228,232,238))
             setPadding(dp(18), dp(18), dp(18), dp(18))
         }
+        contentLayer = FrameLayout(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            pivotX = 0f
+            pivotY = 0f
+        }
         imageView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(Color.WHITE)
@@ -232,8 +247,10 @@ class MainActivity : AppCompatActivity() {
             onStatus = { msg -> showStatus(msg) }
             nextCommentNumber = { allocateCommentNumber() }
         }
-        editorFrame.addView(imageView, FrameLayout.LayoutParams(-1,-1))
-        editorFrame.addView(overlay, FrameLayout.LayoutParams(-1,-1))
+        contentLayer.addView(imageView, FrameLayout.LayoutParams(-1,-1))
+        contentLayer.addView(overlay, FrameLayout.LayoutParams(-1,-1))
+        editorFrame.addView(contentLayer, FrameLayout.LayoutParams(-1,-1))
+        installZoomGestures()
 
         commentPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -372,6 +389,7 @@ class MainActivity : AppCompatActivity() {
         val loaded = store!!.load()
         pageMarks = loaded.first
         currentPage = loaded.second.coerceIn(0, (viewer?.pageCount ?: 1) - 1)
+        resetZoom()
         renderCurrent()
         refreshPageThumbnails()
         refreshComments()
@@ -392,11 +410,111 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun installZoomGestures() {
+        val scaleDetector = ScaleGestureDetector(this,
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    val old = zoomScale
+                    zoomScale = (zoomScale * detector.scaleFactor).coerceIn(1f, 5f)
+                    if (old != zoomScale) {
+                        val fx = detector.focusX - editorFrame.width / 2f
+                        val fy = detector.focusY - editorFrame.height / 2f
+                        val ratio = zoomScale / old
+                        panX = (panX - fx) * ratio + fx
+                        panY = (panY - fy) * ratio + fy
+                        clampPan()
+                        applyZoom()
+                    }
+                    return true
+                }
+            })
+
+        val gestureDetector = GestureDetector(this,
+            object : GestureDetector.SimpleOnGestureListener() {
+                override fun onDown(e: MotionEvent): Boolean = true
+
+                override fun onScroll(
+                    e1: MotionEvent?,
+                    e2: MotionEvent,
+                    distanceX: Float,
+                    distanceY: Float
+                ): Boolean {
+                    if (zoomScale <= 1f) return false
+                    panX -= distanceX
+                    panY -= distanceY
+                    clampPan()
+                    applyZoom()
+                    return true
+                }
+
+                override fun onDoubleTap(e: MotionEvent): Boolean {
+                    if (zoomScale > 1f) resetZoom() else setZoom(2f)
+                    return true
+                }
+            })
+
+        editorFrame.setOnTouchListener { _, event ->
+            val tool = event.getToolType(0)
+            val finger = tool == MotionEvent.TOOL_TYPE_FINGER ||
+                tool == MotionEvent.TOOL_TYPE_UNKNOWN
+            if (!finger) return@setOnTouchListener false
+
+            scaleDetector.onTouchEvent(event)
+            gestureDetector.onTouchEvent(event)
+
+            // Finger gestures belong to navigation. S Pen events pass through to drawing.
+            event.pointerCount > 1 || zoomScale > 1f || event.actionMasked == MotionEvent.ACTION_DOWN
+        }
+    }
+
+    private fun setZoom(value: Float) {
+        zoomScale = value.coerceIn(1f, 5f)
+        if (zoomScale <= 1f) {
+            panX = 0f
+            panY = 0f
+        }
+        clampPan()
+        applyZoom()
+    }
+
+    private fun resetZoom() {
+        zoomScale = 1f
+        panX = 0f
+        panY = 0f
+        if (::contentLayer.isInitialized) applyZoom()
+    }
+
+    private fun applyZoom() {
+        if (!::contentLayer.isInitialized) return
+        contentLayer.scaleX = zoomScale
+        contentLayer.scaleY = zoomScale
+        contentLayer.translationX = panX
+        contentLayer.translationY = panY
+        if (::status.isInitialized && currentDocUri != null) {
+            showStatus(currentDocName + " · Page " + (currentPage + 1) +
+                " · Zoom " + (zoomScale * 100).toInt() + "% · S Pen 필기 / 손가락 이동")
+        }
+    }
+
+    private fun clampPan() {
+        if (!::editorFrame.isInitialized || zoomScale <= 1f) {
+            if (zoomScale <= 1f) {
+                panX = 0f
+                panY = 0f
+            }
+            return
+        }
+        val maxX = editorFrame.width * (zoomScale - 1f) / 2f
+        val maxY = editorFrame.height * (zoomScale - 1f) / 2f
+        panX = panX.coerceIn(-maxX, maxX)
+        panY = panY.coerceIn(-maxY, maxY)
+    }
+
     private fun changePage(delta: Int) {
         val v = viewer ?: return
         saveNow(false)
         val next = (currentPage + delta).coerceIn(0, v.pageCount - 1)
-        if (next != currentPage) { currentPage = next; renderCurrent(); refreshComments() }
+        if (next != currentPage) { currentPage = next; resetZoom(); renderCurrent(); refreshComments() }
     }
 
     private fun askPageJump() {
@@ -415,6 +533,7 @@ class MainActivity : AppCompatActivity() {
                 if (target != null) {
                     saveNow(false)
                     currentPage = (target - 1).coerceIn(0, v.pageCount - 1)
+                    resetZoom()
                     renderCurrent()
                     refreshComments()
                 }
@@ -431,6 +550,7 @@ class MainActivity : AppCompatActivity() {
             .setSingleChoiceItems(pages, currentPage) { dialog, which ->
                 saveNow(false)
                 currentPage = which
+                resetZoom()
                 renderCurrent()
                 refreshComments()
                 dialog.dismiss()
@@ -457,6 +577,7 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener {
                     saveNow(false)
                     currentPage = page
+                    resetZoom()
                     renderCurrent()
                     refreshComments()
                 }
@@ -580,6 +701,7 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.START
                 setOnClickListener {
                     currentPage = c.page
+                    resetZoom()
                     renderCurrent()
                     showStatus("${c.number} 위치로 이동")
                 }
