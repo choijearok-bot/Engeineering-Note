@@ -260,7 +260,7 @@ class MainActivity : AppCompatActivity() {
             } catch (_: IOException) { }
         }
         refreshFolder()
-        showStatus("파일 $imported개 삽입 완료 · 원본과 마크업 데이터 분리 저장")
+        showStatus("파일 ${imported}개 삽입 완료 · 원본과 마크업 데이터 분리 저장")
     }
 
     private fun openDocument(uri: Uri, mime: String?, name: String = "") {
