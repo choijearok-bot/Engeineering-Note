@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var overlay: DrawingOverlayView
     private lateinit var status: TextView
     private lateinit var topBar: HorizontalScrollView
+    private lateinit var toolBar: HorizontalScrollView
 
     private var rootUri: Uri? = null
     private var currentFolder: DocumentFile? = null
@@ -94,45 +95,77 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.rgb(243,244,246))
         }
-        topBar = HorizontalScrollView(this).apply { isFillViewport = true; setBackgroundColor(Color.WHITE) }
-        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(8,8,8,8) }
-        topBar.addView(bar)
 
-        fun b(text: String, action: () -> Unit) = Button(this).apply {
+        fun styledButton(text: String, action: () -> Unit) = Button(this).apply {
             this.text = text
             isAllCaps = false
             minWidth = 0
+            setPadding(dp(12), 0, dp(12), 0)
             setOnClickListener { action() }
-        }.also { bar.addView(it) }
+        }
 
-        b("☰ 파일") { toggle(folderPanel) }
-        b("작업폴더") { pickWorkspace.launch(rootUri) }
-        b("+ 폴더") { askNewFolder() }
-        b("삽입") { importFile.launch(arrayOf("application/pdf", "image/*")) }
-        b("검색") { askSearch() }
-        b("✍ Pen") { setTool(ToolMode.PEN) }
-        b("Highlighter") { setTool(ToolMode.HIGHLIGHTER) }
-        b("Eraser") { setTool(ToolMode.ERASER) }
-        b("Lasso") { setTool(ToolMode.LASSO) }
-        b("☁ Cloud") { setTool(ToolMode.CLOUD) }
-        b("→ Arrow") { setTool(ToolMode.ARROW) }
-        b("╱ Line") { setTool(ToolMode.LINE) }
-        b("□ Box") { setTool(ToolMode.RECT) }
-        b("○ Circle") { setTool(ToolMode.ELLIPSE) }
-        b("⌨ Text") { setTool(ToolMode.TEXT) }
-        b("💬 Comment") { setTool(ToolMode.COMMENT) }
-        b("색상") { chooseColor() }
-        b("굵기") { chooseWidth() }
-        b("S Pen") { sPenSettings() }
-        b("↶") { overlay.undo() }
-        b("↷") { overlay.redo() }
-        b("✨ 정리") { overlay.cleanLastStroke() }
-        b("페이지") { pageManager() }
-        b("◀") { changePage(-1) }
-        b("▶") { changePage(1) }
-        b("Comments") { toggle(commentPanel); refreshComments() }
-        b("읽기") { toggleReadMode() }
-        b("전체화면") { toggleFullScreen() }
+        topBar = HorizontalScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(Color.WHITE)
+        }
+        val navBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(8,6,8,6)
+        }
+        topBar.addView(navBar)
+
+        fun nav(text: String, action: () -> Unit) {
+            navBar.addView(styledButton(text, action))
+        }
+
+        nav("☰ 파일") { toggle(folderPanel) }
+        nav("작업폴더") { pickWorkspace.launch(rootUri) }
+        nav("+ 폴더") { askNewFolder() }
+        nav("삽입") { importFile.launch(arrayOf("application/pdf", "image/*")) }
+        nav("검색") { askSearch() }
+        nav("페이지") { pageManager() }
+        nav("◀") { changePage(-1) }
+        nav("▶") { changePage(1) }
+        nav("Comments") { toggle(commentPanel); refreshComments() }
+        nav("읽기") { toggleReadMode() }
+        nav("전체화면") { toggleFullScreen() }
+
+        toolBar = HorizontalScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(Color.rgb(250,250,250))
+        }
+        val tools = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(8,6,8,6)
+        }
+        toolBar.addView(tools)
+
+        fun tool(text: String, action: () -> Unit) {
+            tools.addView(styledButton(text, action))
+        }
+
+        tool("✍ Pen") { setTool(ToolMode.PEN) }
+        tool("🖍 Highlighter") { setTool(ToolMode.HIGHLIGHTER) }
+        tool("⌫ Eraser") { setTool(ToolMode.ERASER) }
+        tool("Lasso") { setTool(ToolMode.LASSO) }
+        tool("☁ Cloud") { setTool(ToolMode.CLOUD) }
+        tool("→ Arrow") { setTool(ToolMode.ARROW) }
+        tool("╱ Line") { setTool(ToolMode.LINE) }
+        tool("□ Box") { setTool(ToolMode.RECT) }
+        tool("○ Circle") { setTool(ToolMode.ELLIPSE) }
+        tool("T Text") { setTool(ToolMode.TEXT) }
+        tool("💬 Comment") { setTool(ToolMode.COMMENT) }
+        tool("● 얇은펜") { applyPenPreset(Color.BLACK, 3f) }
+        tool("● 기본펜") { applyPenPreset(Color.BLACK, 5f) }
+        tool("● 검토펜") { applyPenPreset(Color.RED, 6f) }
+        tool("색상") { chooseColor() }
+        tool("굵기") { chooseWidth() }
+        tool("S Pen") { sPenSettings() }
+        tool("↶") { overlay.undo() }
+        tool("↷") { overlay.redo() }
+        tool("✨ 정리") { overlay.cleanLastStroke() }
 
         val body = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         folderPanel = LinearLayout(this).apply {
@@ -141,11 +174,19 @@ class MainActivity : AppCompatActivity() {
             setPadding(12,12,12,12)
         }
         folderList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        folderPanel.addView(TextView(this).apply { text="프로젝트 / 카테고리"; textSize=18f; setTextColor(Color.BLACK); setPadding(8,8,8,8) })
+        folderPanel.addView(TextView(this).apply {
+            text="프로젝트 / 카테고리"
+            textSize=18f
+            setTextColor(Color.BLACK)
+            setPadding(8,8,8,8)
+        })
         folderPanel.addView(ScrollView(this).apply { addView(folderList) }, LinearLayout.LayoutParams(dp(270), 0, 1f))
 
         editorFrame = FrameLayout(this).apply { setBackgroundColor(Color.rgb(75,75,75)) }
-        imageView = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.rgb(75,75,75)) }
+        imageView = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(Color.rgb(75,75,75))
+        }
         overlay = DrawingOverlayView(this).apply {
             onChanged = { saveNow(true); refreshComments() }
             onStatus = { msg -> showStatus(msg) }
@@ -160,7 +201,12 @@ class MainActivity : AppCompatActivity() {
             setPadding(10,10,10,10)
             visibility = View.GONE
         }
-        commentPanel.addView(TextView(this).apply { text="Comment List"; textSize=18f; setTextColor(Color.BLACK); setPadding(8,8,8,12) })
+        commentPanel.addView(TextView(this).apply {
+            text="Comment List"
+            textSize=18f
+            setTextColor(Color.BLACK)
+            setPadding(8,8,8,12)
+        })
         commentList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         commentPanel.addView(ScrollView(this).apply { addView(commentList) }, LinearLayout.LayoutParams(dp(320), 0, 1f))
 
@@ -174,7 +220,8 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Color.WHITE)
             setTextColor(Color.DKGRAY)
         }
-        root.addView(topBar, LinearLayout.LayoutParams(-1, dp(64)))
+        root.addView(topBar, LinearLayout.LayoutParams(-1, dp(54)))
+        root.addView(toolBar, LinearLayout.LayoutParams(-1, dp(54)))
         root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(status, LinearLayout.LayoutParams(-1, dp(42)))
         setContentView(root)
@@ -310,19 +357,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun pageManager() {
         val v = viewer ?: return
-        val edit = EditText(this).apply {
-            hint = "1 ~ ${v.pageCount}"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-        }
+        val pages = Array(v.pageCount) { i -> "Page " + (i + 1) }
         AlertDialog.Builder(this)
-            .setTitle("페이지 이동 · 현재 ${currentPage+1}/${v.pageCount}")
-            .setView(edit)
-            .setPositiveButton("이동") { _, _ ->
-                val p = edit.text.toString().toIntOrNull()?.minus(1) ?: return@setPositiveButton
-                currentPage = p.coerceIn(0, v.pageCount - 1)
-                renderCurrent(); refreshComments()
+            .setTitle("페이지 · " + (currentPage + 1) + "/" + v.pageCount)
+            .setSingleChoiceItems(pages, currentPage) { dialog, which ->
+                saveNow(false)
+                currentPage = which
+                renderCurrent()
+                refreshComments()
+                dialog.dismiss()
             }
-            .setNegativeButton("취소", null)
+            .setNegativeButton("닫기", null)
             .show()
     }
 
@@ -339,6 +384,14 @@ class MainActivity : AppCompatActivity() {
         overlay.toolMode = tool
         readMode = tool == ToolMode.READ
         showStatus("${tool.name} 모드 · 변경 내용 자동저장")
+    }
+
+    private fun applyPenPreset(color: Int, width: Float) {
+        overlay.penColor = color
+        overlay.penWidth = width
+        overlay.toolMode = ToolMode.PEN
+        readMode = false
+        showStatus("Pen preset 적용 · 굵기 " + width.toInt() + " · 자동저장")
     }
 
     private fun chooseColor() {
@@ -442,6 +495,7 @@ class MainActivity : AppCompatActivity() {
             window.decorView.systemUiVisibility = if (fullScreen) (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY) else View.SYSTEM_UI_FLAG_VISIBLE
         }
         topBar.visibility = if (fullScreen) View.GONE else View.VISIBLE
+        toolBar.visibility = if (fullScreen) View.GONE else View.VISIBLE
         status.visibility = if (fullScreen) View.GONE else View.VISIBLE
     }
 
