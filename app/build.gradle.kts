@@ -10,8 +10,8 @@ android {
         applicationId = "com.kcc.engineeringnote"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.0.0-alpha2"
+        versionCode = 5
+        versionName = "1.0.0-alpha3"
     }
 }
 

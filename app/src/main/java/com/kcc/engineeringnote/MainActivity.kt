@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var topBar: HorizontalScrollView
     private lateinit var toolBar: HorizontalScrollView
+    private lateinit var pageIndicator: TextView
 
     private var rootUri: Uri? = null
     private var currentFolder: DocumentFile? = null
@@ -124,9 +125,19 @@ class MainActivity : AppCompatActivity() {
         nav("+ 폴더") { askNewFolder() }
         nav("삽입") { importFile.launch(arrayOf("application/pdf", "image/*")) }
         nav("검색") { askSearch() }
-        nav("페이지") { pageManager() }
+        nav("페이지 목록") { pageManager() }
         nav("◀") { changePage(-1) }
+        pageIndicator = TextView(this).apply {
+            text = "1 / 1"
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setTextColor(Color.BLACK)
+            setPadding(dp(12), 0, dp(12), 0)
+            setOnClickListener { askPageJump() }
+        }
+        navBar.addView(pageIndicator, LinearLayout.LayoutParams(dp(110), -1))
         nav("▶") { changePage(1) }
+        nav("페이지 이동") { askPageJump() }
         nav("Comments") { toggle(commentPanel); refreshComments() }
         nav("읽기") { toggleReadMode() }
         nav("전체화면") { toggleFullScreen() }
@@ -343,6 +354,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 imageView.setImageBitmap(bmp)
                 overlay.setMarks(pageMarks.getOrPut(currentPage) { mutableListOf() })
+                pageIndicator.text = "${currentPage + 1} / ${v.pageCount}"
                 showStatus("$currentDocName · Page ${currentPage+1}/${v.pageCount} · 자동저장 ON · S Pen 압력지원 · 버튼=순간 지우개")
             }
         }.start()
@@ -355,9 +367,33 @@ class MainActivity : AppCompatActivity() {
         if (next != currentPage) { currentPage = next; renderCurrent(); refreshComments() }
     }
 
+    private fun askPageJump() {
+        val v = viewer ?: return
+        val input = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            hint = "1 ~ " + v.pageCount
+            setText((currentPage + 1).toString())
+            selectAll()
+        }
+        AlertDialog.Builder(this)
+            .setTitle("페이지 이동 · 총 " + v.pageCount + "장")
+            .setView(input)
+            .setPositiveButton("이동") { _, _ ->
+                val target = input.text.toString().toIntOrNull()
+                if (target != null) {
+                    saveNow(false)
+                    currentPage = (target - 1).coerceIn(0, v.pageCount - 1)
+                    renderCurrent()
+                    refreshComments()
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
     private fun pageManager() {
         val v = viewer ?: return
-        val pages = Array(v.pageCount) { i -> "Page " + (i + 1) }
+        val pages = Array(v.pageCount) { i -> if (i == currentPage) "● Page " + (i + 1) else "Page " + (i + 1) }
         AlertDialog.Builder(this)
             .setTitle("페이지 · " + (currentPage + 1) + "/" + v.pageCount)
             .setSingleChoiceItems(pages, currentPage) { dialog, which ->
