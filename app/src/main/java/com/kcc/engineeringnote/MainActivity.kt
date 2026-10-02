@@ -3,6 +3,7 @@ package com.kcc.engineeringnote
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -31,6 +32,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var topBar: HorizontalScrollView
     private lateinit var toolBar: HorizontalScrollView
     private lateinit var pageIndicator: TextView
+    private lateinit var thumbnailPanel: LinearLayout
+    private lateinit var thumbnailList: LinearLayout
 
     private var rootUri: Uri? = null
     private var currentFolder: DocumentFile? = null
@@ -101,13 +104,16 @@ class MainActivity : AppCompatActivity() {
             this.text = text
             isAllCaps = false
             minWidth = 0
+            textSize = 13f
+            setTextColor(Color.rgb(34, 45, 64))
             setPadding(dp(12), 0, dp(12), 0)
+            background = roundedBg(Color.WHITE, 12f, Color.rgb(222, 228, 236))
             setOnClickListener { action() }
         }
 
         topBar = HorizontalScrollView(this).apply {
             isFillViewport = true
-            setBackgroundColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(246,248,251))
         }
         val navBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -144,7 +150,7 @@ class MainActivity : AppCompatActivity() {
 
         toolBar = HorizontalScrollView(this).apply {
             isFillViewport = true
-            setBackgroundColor(Color.rgb(250,250,250))
+            setBackgroundColor(Color.rgb(255,255,255))
         }
         val tools = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -178,10 +184,13 @@ class MainActivity : AppCompatActivity() {
         tool("↷") { overlay.redo() }
         tool("✨ 정리") { overlay.cleanLastStroke() }
 
-        val body = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
         folderPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.WHITE)
+            background = roundedBg(Color.WHITE, 18f, Color.rgb(226,231,238))
             setPadding(12,12,12,12)
         }
         folderList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -193,10 +202,30 @@ class MainActivity : AppCompatActivity() {
         })
         folderPanel.addView(ScrollView(this).apply { addView(folderList) }, LinearLayout.LayoutParams(dp(270), 0, 1f))
 
-        editorFrame = FrameLayout(this).apply { setBackgroundColor(Color.rgb(75,75,75)) }
+        thumbnailPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedBg(Color.rgb(248,250,253), 18f, Color.rgb(226,231,238))
+            setPadding(dp(8), dp(10), dp(8), dp(10))
+        }
+        thumbnailPanel.addView(TextView(this).apply {
+            text = "Pages"
+            textSize = 15f
+            setTextColor(Color.rgb(34,45,64))
+            setPadding(dp(6),0,dp(6),dp(8))
+        })
+        thumbnailList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        thumbnailPanel.addView(ScrollView(this).apply {
+            isFillViewport = true
+            addView(thumbnailList)
+        }, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        editorFrame = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(228,232,238))
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+        }
         imageView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setBackgroundColor(Color.rgb(75,75,75))
+            setBackgroundColor(Color.WHITE)
         }
         overlay = DrawingOverlayView(this).apply {
             onChanged = { saveNow(true); refreshComments() }
@@ -208,7 +237,7 @@ class MainActivity : AppCompatActivity() {
 
         commentPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.WHITE)
+            background = roundedBg(Color.WHITE, 18f, Color.rgb(226,231,238))
             setPadding(10,10,10,10)
             visibility = View.GONE
         }
@@ -221,15 +250,16 @@ class MainActivity : AppCompatActivity() {
         commentList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         commentPanel.addView(ScrollView(this).apply { addView(commentList) }, LinearLayout.LayoutParams(dp(320), 0, 1f))
 
-        body.addView(folderPanel, LinearLayout.LayoutParams(dp(290), -1))
+        body.addView(folderPanel, LinearLayout.LayoutParams(dp(250), -1).apply { marginEnd = dp(8) })
+        body.addView(thumbnailPanel, LinearLayout.LayoutParams(dp(150), -1).apply { marginEnd = dp(8) })
         body.addView(editorFrame, LinearLayout.LayoutParams(0, -1, 1f))
         body.addView(commentPanel, LinearLayout.LayoutParams(dp(340), -1))
 
         status = TextView(this).apply {
             text = "작업폴더를 선택하세요"
             setPadding(16,8,16,8)
-            setBackgroundColor(Color.WHITE)
-            setTextColor(Color.DKGRAY)
+            setBackgroundColor(Color.rgb(247,249,252))
+            setTextColor(Color.rgb(84,96,112))
         }
         root.addView(topBar, LinearLayout.LayoutParams(-1, dp(54)))
         root.addView(toolBar, LinearLayout.LayoutParams(-1, dp(54)))
@@ -343,6 +373,7 @@ class MainActivity : AppCompatActivity() {
         pageMarks = loaded.first
         currentPage = loaded.second.coerceIn(0, (viewer?.pageCount ?: 1) - 1)
         renderCurrent()
+        refreshPageThumbnails()
         refreshComments()
     }
 
@@ -355,6 +386,7 @@ class MainActivity : AppCompatActivity() {
                 imageView.setImageBitmap(bmp)
                 overlay.setMarks(pageMarks.getOrPut(currentPage) { mutableListOf() })
                 pageIndicator.text = "${currentPage + 1} / ${v.pageCount}"
+                highlightCurrentThumbnail()
                 showStatus("$currentDocName · Page ${currentPage+1}/${v.pageCount} · 자동저장 ON · S Pen 압력지원 · 버튼=순간 지우개")
             }
         }.start()
@@ -405,6 +437,62 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("닫기", null)
             .show()
+    }
+
+    private fun refreshPageThumbnails() {
+        if (!::thumbnailList.isInitialized) return
+        thumbnailList.removeAllViews()
+        val v = viewer ?: return
+        for (page in 0 until v.pageCount) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                tag = page
+                setPadding(dp(4), dp(5), dp(4), dp(5))
+                background = roundedBg(
+                    if (page == currentPage) Color.rgb(229,238,255) else Color.WHITE,
+                    14f,
+                    if (page == currentPage) Color.rgb(87,125,255) else Color.rgb(224,229,236)
+                )
+                setOnClickListener {
+                    saveNow(false)
+                    currentPage = page
+                    renderCurrent()
+                    refreshComments()
+                }
+            }
+            val preview = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                setBackgroundColor(Color.WHITE)
+            }
+            val label = TextView(this).apply {
+                text = (page + 1).toString()
+                gravity = Gravity.CENTER
+                textSize = 12f
+                setTextColor(Color.rgb(65,75,90))
+                setPadding(0, dp(4), 0, 0)
+            }
+            card.addView(preview, LinearLayout.LayoutParams(dp(112), dp(145)))
+            card.addView(label, LinearLayout.LayoutParams(-1, dp(24)))
+            thumbnailList.addView(card, LinearLayout.LayoutParams(-1, dp(185)).apply { bottomMargin = dp(8) })
+            Thread {
+                val bmp = runCatching { v.renderPage(page, 240) }.getOrNull()
+                runOnUiThread { if (bmp != null) preview.setImageBitmap(bmp) }
+            }.start()
+        }
+    }
+
+    private fun highlightCurrentThumbnail() {
+        if (!::thumbnailList.isInitialized) return
+        for (i in 0 until thumbnailList.childCount) {
+            val child = thumbnailList.getChildAt(i)
+            val selected = (child.tag as? Int) == currentPage
+            child.background = roundedBg(
+                if (selected) Color.rgb(229,238,255) else Color.WHITE,
+                14f,
+                if (selected) Color.rgb(87,125,255) else Color.rgb(224,229,236)
+            )
+        }
     }
 
     private fun saveNow(showIndicator: Boolean) {
@@ -550,6 +638,14 @@ class MainActivity : AppCompatActivity() {
         }
         return null
     }
+
+    private fun roundedBg(fill: Int, radiusDp: Float, stroke: Int): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(fill)
+            cornerRadius = dp(radiusDp.toInt()).toFloat()
+            setStroke(dp(1), stroke)
+        }
 
     private fun toggle(view: View) { view.visibility = if (view.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
     private fun showStatus(text: String) { status.text = text }
