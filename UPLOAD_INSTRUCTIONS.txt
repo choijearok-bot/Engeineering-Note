@@ -1,0 +1,17 @@
+Engineering Note - GitHub Actions build setup
+
+Upload the CONTENTS of this ZIP to the root of your Engineering Note repository.
+
+Expected added files:
+.github/workflows/android-build.yml
+.gitignore
+
+After committing:
+1. Open the repository's Actions tab.
+2. Select "Build Android APK".
+3. If it did not start automatically, click "Run workflow".
+4. When the build finishes, open the workflow run.
+5. Download "EngineeringNote-debug-apk" from Artifacts.
+6. Extract the ZIP and install app-debug.apk on the Galaxy Tab.
+
+This workflow intentionally uses Gradle 9.6 directly, so gradlew / gradlew.bat are not required for GitHub Actions.
