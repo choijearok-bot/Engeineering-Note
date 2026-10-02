@@ -26,7 +26,12 @@ class DrawingOverlayView @JvmOverloads constructor(
     var onChanged: (() -> Unit)? = null
     var onStatus: ((String) -> Unit)? = null
     var nextCommentNumber: (() -> String)? = null
+    var penOnlyMode: Boolean = true
+    var pressureEnabled: Boolean = true
+    var stylusButtonEraser: Boolean = true
 
+    private var selectedId: Long? = null
+    private var lastDragPoint: NPoint? = null
     private var marks: MutableList<Markup> = mutableListOf()
     private val redoStack = mutableListOf<Markup>()
     private var working: Markup? = null
@@ -90,16 +95,25 @@ class DrawingOverlayView @JvmOverloads constructor(
         super.onDraw(canvas)
         marks.forEach { drawMarkup(canvas, it) }
         working?.let { drawMarkup(canvas, it) }
+        drawSelection(canvas)
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (toolMode == ToolMode.READ) return false
         val isStylus = e.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS || e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
-        if (!isStylus && toolMode in setOf(ToolMode.PEN, ToolMode.HIGHLIGHTER, ToolMode.ERASER)) return false
+        if (penOnlyMode && !isStylus && toolMode in setOf(ToolMode.PEN, ToolMode.HIGHLIGHTER, ToolMode.ERASER, ToolMode.LASSO)) return false
 
         val p = norm(e.x, e.y, e.pressure.coerceIn(0.1f, 1.5f))
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                if (isStylus) requestUnbufferedDispatch(e)
+                if (toolMode == ToolMode.LASSO) {
+                    selectedId = findNearestMark(p)?.id
+                    lastDragPoint = p
+                    invalidate()
+                    onStatus?.invoke(if (selectedId != null) "선택됨 · 드래그하여 이동" else "선택할 객체를 터치하세요")
+                    return true
+                }
                 if (toolMode == ToolMode.TEXT) {
                     requestText(p, false)
                     return true
@@ -109,7 +123,7 @@ class DrawingOverlayView @JvmOverloads constructor(
                     return true
                 }
                 if (toolMode == ToolMode.ERASER || e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER ||
-                    (isStylus && (e.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0)) {
+                    (stylusButtonEraser && isStylus && (e.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0)) {
                     eraseAt(p)
                     return true
                 }
@@ -118,7 +132,9 @@ class DrawingOverlayView @JvmOverloads constructor(
                     ToolMode.HIGHLIGHTER -> MarkupType.HIGHLIGHTER
                     ToolMode.CLOUD -> MarkupType.CLOUD
                     ToolMode.ARROW -> MarkupType.ARROW
+                    ToolMode.LINE -> MarkupType.LINE
                     ToolMode.RECT -> MarkupType.RECT
+                    ToolMode.ELLIPSE -> MarkupType.ELLIPSE
                     else -> return true
                 }
                 working = Markup(type = type, points = mutableListOf(p), color = penColor, width = penWidth, fontSize = textSizePx)
@@ -126,6 +142,10 @@ class DrawingOverlayView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (toolMode == ToolMode.LASSO) {
+                    moveSelected(p)
+                    return true
+                }
                 if (toolMode == ToolMode.ERASER) eraseAt(p)
                 else working?.let {
                     if (it.type == MarkupType.PEN || it.type == MarkupType.HIGHLIGHTER) it.points += p
@@ -135,6 +155,11 @@ class DrawingOverlayView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (toolMode == ToolMode.LASSO) {
+                    lastDragPoint = null
+                    onChanged?.invoke()
+                    return true
+                }
                 working?.let {
                     if (it.points.size == 1) it.points += p
                     marks += it
@@ -195,6 +220,56 @@ class DrawingOverlayView @JvmOverloads constructor(
         dlg.show()
     }
 
+    private fun findNearestMark(p: NPoint): Markup? {
+        val radius = 0.045f
+        return marks.asReversed().firstOrNull { m ->
+            m.points.any { hypot(it.x - p.x, it.y - p.y) < radius } ||
+                (m.points.size >= 2 &&
+                    p.x in min(m.points[0].x, m.points[1].x)..max(m.points[0].x, m.points[1].x) &&
+                    p.y in min(m.points[0].y, m.points[1].y)..max(m.points[0].y, m.points[1].y))
+        }
+    }
+
+    private fun moveSelected(p: NPoint) {
+        val id = selectedId ?: return
+        val prev = lastDragPoint ?: p
+        val dx = p.x - prev.x
+        val dy = p.y - prev.y
+        marks.firstOrNull { it.id == id }?.let { mark ->
+            mark.points.indices.forEach { i ->
+                val q = mark.points[i]
+                mark.points[i] = q.copy(
+                    x = (q.x + dx).coerceIn(0f, 1f),
+                    y = (q.y + dy).coerceIn(0f, 1f)
+                )
+            }
+        }
+        lastDragPoint = p
+        invalidate()
+    }
+
+    private fun drawSelection(canvas: Canvas) {
+        val id = selectedId ?: return
+        val mark = marks.firstOrNull { it.id == id } ?: return
+        if (mark.points.isEmpty()) return
+        val xs = mark.points.map { it.x * width }
+        val ys = mark.points.map { it.y * height }
+        val pad = 14f
+        val rect = RectF(
+            (xs.minOrNull() ?: 0f) - pad,
+            (ys.minOrNull() ?: 0f) - pad,
+            (xs.maxOrNull() ?: 0f) + pad,
+            (ys.maxOrNull() ?: 0f) + pad
+        )
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(33, 150, 243)
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+            pathEffect = DashPathEffect(floatArrayOf(10f, 8f), 0f)
+        }
+        canvas.drawRect(rect, paint)
+    }
+
     private fun eraseAt(p: NPoint) {
         val radius = 0.028f
         val idx = marks.indexOfLast { m -> m.points.any { hypot(it.x - p.x, it.y - p.y) < radius } }
@@ -209,6 +284,8 @@ class DrawingOverlayView @JvmOverloads constructor(
         when (m.type) {
             MarkupType.PEN, MarkupType.HIGHLIGHTER -> drawInk(canvas, m)
             MarkupType.RECT -> if (m.points.size >= 2) canvas.drawRect(rectOf(m.points[0], m.points[1]), strokePaint(m))
+            MarkupType.ELLIPSE -> if (m.points.size >= 2) canvas.drawOval(rectOf(m.points[0], m.points[1]), strokePaint(m))
+            MarkupType.LINE -> if (m.points.size >= 2) { val a = denorm(m.points[0]); val b = denorm(m.points[1]); canvas.drawLine(a.x, a.y, b.x, b.y, strokePaint(m)) }
             MarkupType.CLOUD -> if (m.points.size >= 2) drawCloud(canvas, rectOf(m.points[0], m.points[1]), strokePaint(m))
             MarkupType.ARROW -> if (m.points.size >= 2) drawArrow(canvas, denorm(m.points[0]), denorm(m.points[1]), strokePaint(m))
             MarkupType.TEXT -> drawText(canvas, m, false)
@@ -221,7 +298,7 @@ class DrawingOverlayView @JvmOverloads constructor(
         for (i in 1 until m.points.size) {
             val a = denorm(m.points[i - 1])
             val b = denorm(m.points[i])
-            val pressure = ((m.points[i - 1].pressure + m.points[i].pressure) / 2f).coerceIn(0.25f, 1.6f)
+            val pressure = if (pressureEnabled) ((m.points[i - 1].pressure + m.points[i].pressure) / 2f).coerceIn(0.25f, 1.6f) else 1f
             val p = strokePaint(m).apply {
                 strokeWidth = if (m.type == MarkupType.HIGHLIGHTER) m.width * 2.2f else m.width * pressure
                 if (m.type == MarkupType.HIGHLIGHTER) alpha = 75

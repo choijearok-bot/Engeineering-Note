@@ -4,9 +4,9 @@ import android.graphics.Color
 
 data class NPoint(val x: Float, val y: Float, val pressure: Float = 1f)
 
-enum class MarkupType { PEN, HIGHLIGHTER, CLOUD, ARROW, RECT, TEXT, COMMENT }
+enum class MarkupType { PEN, HIGHLIGHTER, CLOUD, ARROW, LINE, RECT, ELLIPSE, TEXT, COMMENT }
 enum class CommentStatus { OPEN, PENDING, CLOSED }
-enum class ToolMode { PEN, HIGHLIGHTER, CLOUD, ARROW, RECT, TEXT, COMMENT, ERASER, READ }
+enum class ToolMode { PEN, HIGHLIGHTER, ERASER, LASSO, CLOUD, ARROW, LINE, RECT, ELLIPSE, TEXT, COMMENT, READ }
 
 data class Markup(
     val id: Long = System.nanoTime(),

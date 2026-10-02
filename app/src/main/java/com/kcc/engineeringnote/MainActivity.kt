@@ -113,13 +113,17 @@ class MainActivity : AppCompatActivity() {
         b("✍ Pen") { setTool(ToolMode.PEN) }
         b("Highlighter") { setTool(ToolMode.HIGHLIGHTER) }
         b("Eraser") { setTool(ToolMode.ERASER) }
+        b("Lasso") { setTool(ToolMode.LASSO) }
         b("☁ Cloud") { setTool(ToolMode.CLOUD) }
         b("→ Arrow") { setTool(ToolMode.ARROW) }
+        b("╱ Line") { setTool(ToolMode.LINE) }
         b("□ Box") { setTool(ToolMode.RECT) }
+        b("○ Circle") { setTool(ToolMode.ELLIPSE) }
         b("⌨ Text") { setTool(ToolMode.TEXT) }
         b("💬 Comment") { setTool(ToolMode.COMMENT) }
         b("색상") { chooseColor() }
         b("굵기") { chooseWidth() }
+        b("S Pen") { sPenSettings() }
         b("↶") { overlay.undo() }
         b("↷") { overlay.redo() }
         b("✨ 정리") { overlay.cleanLastStroke() }
@@ -353,6 +357,22 @@ class MainActivity : AppCompatActivity() {
             overlay.textSizePx = 24f + names[which].toFloat() * 2f
             showStatus("펜 굵기: ${names[which]}")
         }.show()
+    }
+
+    private fun sPenSettings() {
+        val labels = arrayOf("S Pen만 필기 (손가락은 화면 조작)", "필압으로 선 굵기 조절", "S Pen 버튼 = 순간 지우개")
+        val checked = booleanArrayOf(overlay.penOnlyMode, overlay.pressureEnabled, overlay.stylusButtonEraser)
+        AlertDialog.Builder(this)
+            .setTitle("S Pen 설정")
+            .setMultiChoiceItems(labels, checked) { _, which, value -> checked[which] = value }
+            .setPositiveButton("적용") { _, _ ->
+                overlay.penOnlyMode = checked[0]
+                overlay.pressureEnabled = checked[1]
+                overlay.stylusButtonEraser = checked[2]
+                showStatus("S Pen 설정 적용 · 팜리젝션 우선 · 자동저장 ON")
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun allocateCommentNumber(): String {
